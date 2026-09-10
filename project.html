@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IMT407 极狐T1 车载HUD项目 — 完整方案</title>
+<style>
+:root{--bg:#1a1a2e;--surface:#16213e;--card:#1c1c2e;--text:#e0e0e0;--text2:#a0a0b0;--muted:#6c6c80;--border:#2a2a3e;--brand:#635bff;--brand2:#9d97ff;--accent:#e8590c;--green:#22c55e;--yellow:#eab308;--red:#ef4444;--cyan:#06b6d4;--code-bg:#0d0d1a;--font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;--mono:"SF Mono","Fira Code",Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.6;padding:20px;max-width:1200px;margin:0 auto}
+h1{font-size:24px;font-weight:700;margin-bottom:4px;color:#fff}
+h2{font-size:18px;font-weight:600;color:var(--brand2);margin:28px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:15px;font-weight:600;color:#fff;margin:20px 0 8px}
+h4{font-size:13px;font-weight:600;color:var(--text2);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.5px}
+p{margin:6px 0;color:var(--text)}
+.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;margin-right:4px}
+.tag-done{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+.tag-todo{background:rgba(99,91,255,.15);color:var(--brand2);border:1px solid rgba(99,91,255,.3)}
+.tag-warn{background:rgba(234,179,8,.15);color:var(--yellow);border:1px solid rgba(234,179,8,.3)}
+.tag-drop{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25)}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th{background:var(--surface);color:var(--text2);padding:7px 10px;text-align:left;border:1px solid var(--border);font-weight:600;font-size:12px}
+td{padding:6px 10px;border:1px solid var(--border);color:var(--text)}
+tr:nth-child(even){background:rgba(255,255,255,.02)}
+code{font-family:var(--mono);background:var(--code-bg);padding:1px 5px;border-radius:3px;font-size:12px;color:var(--brand2)}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:12px;overflow-x:auto;margin:10px 0;font-size:12px}
+pre code{background:none;padding:0;color:#d4d4d4}
+.k{color:#c678dd}.s{color:#98c379}.c{color:#5c6370}.n{color:#e5c07b}.f{color:#61afef}.t{color:#d19a66}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin:10px 0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+@media(max-width:768px){.grid2,.grid3{grid-template-columns:1fr}}
+.note{border-left:3px solid var(--brand);padding:8px 12px;margin:10px 0;background:rgba(99,91,255,.06)}
+.warn{border-left:3px solid var(--yellow);padding:8px 12px;margin:10px 0;background:rgba(234,179,8,.06)}
+.danger{border-left:3px solid var(--red);padding:8px 12px;margin:10px 0;background:rgba(239,68,68,.06)}
+.ok{border-left:3px solid var(--green);padding:8px 12px;margin:10px 0;background:rgba(34,197,94,.06)}
+ul{margin:6px 0;padding-left:20px}li{margin:3px 0}
+.summary{background:linear-gradient(135deg,rgba(99,91,255,.1),rgba(6,182,212,.1));border:1px solid var(--brand);border-radius:10px;padding:16px;margin:16px 0}
+.mono{font-family:var(--mono);font-size:12px}
+.href-link{color:var(--brand2);text-decoration:none;border-bottom:1px dotted var(--brand2)}
+.href-link:hover{color:#fff}
+</style>
+</head>
+<body>
+
+<h1>IMT407 极狐T1 车载 HUD 项目</h1>
+<p style="color:var(--muted);font-size:12px">启动日期: 2026-09-05 · 跟踪日志: <code>PROGRESS.md</code></p>
+
+<div class="summary">
+<p><strong>一句话方案：</strong>F407 采集 OBD+GPS+IMU 数据 → ESP8266 WiFi → 七彩虹 E708 Q1 平板浏览器渲染 HUD 界面 → 平板屏幕贴反射膜投影到挡风玻璃。</p>
+<p style="margin-top:6px"><strong>总物料成本：约 55 元</strong>（主控板+平板已有） · <strong>开发周期：5 步分阶段</strong> · <strong>商业对标：800-1500 元</strong></p>
+</div>
+
+<h2>一、硬件基础</h2>
+
+<h3>1.1 主控板：启明欣欣 IMT407 V3.1</h3>
+<p>STM32F407ZGT6 全功能开发板，品牌启明欣欣（ILLUMINATI），官网 xinlucity.com，兼容正点原子 F407 例程。</p>
+
+<table>
+<tr><th>维度</th><th>规格</th><th>本项目利用点</th></tr>
+<tr><td>内核</td><td>ARM Cortex-M4F, 168MHz, 210 DMIPS</td><td>FPU 浮点能耗积分, DSP 指令</td></tr>
+<tr><td>Flash</td><td>1 MB (W25Q16 外挂 2MB SPI Flash)</td><td>存程序 + Web 资源</td></tr>
+<tr><td>SRAM</td><td>192 KB (112K主+16K+64K CCM) +4K备份</td><td>多串口缓冲 + 能耗计算</td></tr>
+<tr><td>UART</td><td>4 USART + 2 UART = 6 路串口</td><td>ESP8266 + OBD + GPS 三路独立</td></tr>
+<tr><td>I2C</td><td>3 路</td><td>接 MPU6050 IMU</td></tr>
+<tr><td>SDIO</td><td>1 路</td><td>接 MicroSD 数据日志</td></tr>
+<tr><td>双 CAN</td><td>CAN 2.0B Active (PA11/12, PB12/13)</td><td>备选: 直读 CAN 总线</td></tr>
+<tr><td>USB OTG</td><td>FS+HS</td><td>-</td></tr>
+<tr><td>ADC</td><td>3×12bit, 2.4MSPS</td><td>备选: 电压电流采集</td></tr>
+<tr><td>DAC</td><td>2×12bit</td><td>-</td></tr>
+<tr><td>FSMC</td><td>NOR/NAND/SRAM</td><td>备选: 并口屏</td></tr>
+<tr><td>封装</td><td>LQFP144, 114 GPIO</td><td>-</td></tr>
+</table>
+
+<h4>板载资源</h4>
+<ul>
+<li>W25Q16 SPI Flash (2MB) — 可存模型权重/网页资源</li>
+<li>DB9 RS232 (MAX3232) — ±12V 电平，非 TTL</li>
+<li>双 USB: Type-A (Host) + Mini (Device/DFU)</li>
+<li>JTAG/SWD 20pin 调试口</li>
+<li>RTC + CR1220 纽扣电池</li>
+<li>蜂鸣器、全 GPIO 黄色排针引出</li>
+</ul>
+
+<h4>启动模式与烧录</h4>
+<table>
+<tr><th>BOOT1</th><th>BOOT0</th><th>启动空间</th><th>用途</th></tr>
+<tr><td>X</td><td>0</td><td>主 Flash</td><td>正常运行（默认）</td></tr>
+<tr><td>0</td><td>1</td><td>系统存储器</td><td>ISP/DFU 烧录</td></tr>
+<tr><td>1</td><td>1</td><td>内置 SRAM</td><td>调试，断电丢失</td></tr>
+</table>
+<div class="warn">烧录方式: <strong>SWD（ST-Link V2）推荐</strong> / DFU / 串口 ISP。禁用 FlyMcu（会锁 F407）。</div>
+
+<h3>1.2 车辆：极狐贝塔T1 2026款 450 PRO</h3>
+<table>
+<tr><th>参数</th><th>值</th></tr>
+<tr><td>上市</td><td>2026年6月, 6.98万</td></tr>
+<tr><td>电机</td><td>永磁同步 95kW / 129Ps / 176N·m</td></tr>
+<tr><td>电池</td><td>~42.3kWh, CLTC 450km</td></tr>
+<tr><td>平台</td><td>400V, 八合一电驱</td></tr>
+<tr><td>车机</td><td>X9 HP 芯片, 15.6寸中控+8.8寸仪表</td></tr>
+<tr><td>互联</td><td>CarPlay / HiCar / Carlink, AI语音"小狐狸"</td></tr>
+<tr><td>辅助驾驶</td><td>L2, 540°全景, 50米循迹倒车</td></tr>
+</table>
+
+<div class="danger">
+<strong>网络安全法规约束（GB 44495 / UN R155）:</strong>
+<ul>
+<li>CAN 总线有<strong>网关分段隔离</strong>（动力CAN/底盘CAN/车身CAN/娱乐CAN分开），外部报文注入会被过滤</li>
+<li>OBD 接口<strong>只读</strong>：量产车关闭诊断写入和固件刷写，仅保留故障码读取</li>
+<li><strong>只能做只读 OBD + 外挂设备</strong>，不能注入 CAN / 刷写 ECU</li>
+</ul>
+</div>
+
+<h3>1.3 显示终端：七彩虹 E708 Q1 平板</h3>
+<table>
+<tr><th>参数</th><th>值</th><th>本项目影响</th></tr>
+<tr><td>屏幕</td><td>7寸 1280×800 IPS</td><td>大屏 HUD 渲染</td></tr>
+<tr><td>系统</td><td>Android 4.2</td><td>浏览器跑 HTML5, 不写原生APP</td></tr>
+<tr><td>Mini HDMI</td><td><strong>输出</strong>（非输入）</td><td>不能接 F407 VGA 当显示器</td></tr>
+<tr><td>蓝牙</td><td><strong>不支持</strong></td><td>只能用 WiFi 通信</td></tr>
+<tr><td>USB</td><td>Micro USB 2.0</td><td>-</td></tr>
+<tr><td>WiFi</td><td>支持</td><td><strong>唯一可靠通信通道</strong></td></tr>
+<tr><td>亮度</td><td>约 300-400 nit</td><td>白天阳光直射偏暗, 夜间够用</td></tr>
+</table>
+<div class="note">HDMI 只能镜像输出，安卓 4.2 不支持扩展显示。所以不接外屏，平板屏幕直接当 HUD 投影源。</div>
+
+<h2>二、物料清单（BOM）</h2>
+
+<table>
+<tr><th>#</th><th>模块</th><th>型号</th><th>用途</th><th>接口</th><th>参考价</th></tr>
+<tr><td>1</td><td>WiFi模块</td><td>ESP8266 ESP-01S</td><td>F407→平板 WiFi 通信</td><td>UART</td><td>8元</td></tr>
+<tr><td>2</td><td>OBD读取</td><td>ELM327 UART版（TTL串口，非蓝牙）</td><td>读极狐T1 OBD-II数据</td><td>UART</td><td>15元</td></tr>
+<tr><td>3</td><td>GPS</td><td>NEO-6M</td><td>速度/海拔/轨迹</td><td>UART</td><td>10元</td></tr>
+<tr><td>4</td><td>IMU</td><td>MPU6050</td><td>加速度/陀螺仪/坡度</td><td>I2C</td><td>5元</td></tr>
+<tr><td>5</td><td>OBD分配</td><td>OBD一转二延长线</td><td>手机和F407共用OBD口</td><td>-</td><td>10元</td></tr>
+<tr><td>6</td><td>HUD膜</td><td>HUD专用反射膜</td><td>贴挡风玻璃</td><td>-</td><td>3-5元</td></tr>
+<tr><td>7</td><td>SD卡</td><td>MicroSD 8GB+</td><td>全程数据日志</td><td>SDIO</td><td>10元(已有)</td></tr>
+<tr><td>8</td><td>杜邦线</td><td>母对母/公对母若干</td><td>接线</td><td>-</td><td>3元</td></tr>
+<tr><td>9</td><td>电源</td><td>车充USB 5V/2A + Type-C线</td><td>给F407和平板供电</td><td>-</td><td>已有</td></tr>
+</table>
+<p><strong>总计: 约 55-65 元</strong>（主控板 IMT407 和平板均为已有，零成本）</p>
+
+<h2>三、硬件方案</h2>
+
+<h3>3.1 F407 接口分配</h3>
+<table>
+<tr><th>外设</th><th>F407端口</th><th>引脚</th><th>连接模块</th><th>波特率</th></tr>
+<tr><td>USART1</td><td>APB2</td><td>PA9(TX) / PA10(RX)</td><td>ESP8266 WiFi</td><td>115200</td></tr>
+<tr><td>USART2</td><td>APB1</td><td>PA2(TX) / PA3(RX)</td><td>ELM327 OBD</td><td>38400</td></tr>
+<tr><td>USART3</td><td>APB1</td><td>PB10(TX) / PB11(RX)</td><td>GPS NEO-6M</td><td>9600</td></tr>
+<tr><td>I2C1</td><td>APB1</td><td>PB6(SCL) / PB7(SDA)</td><td>MPU6050</td><td>400kHz</td></tr>
+<tr><td>SDIO</td><td>AHB</td><td>PC8-12, PD2</td><td>MicroSD卡</td><td>-</td></tr>
+<tr><td>SPI1</td><td>APB2</td><td>PA5/6/7</td><td>备选: 外挂传感器</td><td>-</td></tr>
+</table>
+
+<h3>3.2 接线表</h3>
+
+<h4>ESP8266 ESP-01S → F407</h4>
+<table>
+<tr><th>ESP-01S</th><th>F407</th><th>说明</th></tr>
+<tr><td>VCC (3.3V)</td><td>3.3V</td><td>供电，需稳定，峰值300mA</td></tr>
+<tr><td>GND</td><td>GND</td><td>共地</td></tr>
+<tr><td>TX</td><td>PA10 (USART1 RX)</td><td>ESP发→F407收</td></tr>
+<tr><td>RX</td><td>PA9 (USART1 TX)</td><td>F407发→ESP收</td></tr>
+<tr><td>EN (CH_PD)</td><td>3.3V</td><td>使能，必须拉高</td></tr>
+<tr><td>RST</td><td>PA8 (可选)</td><td>复位控制，可选接GPIO</td></tr>
+<tr><td>GPIO0</td><td>3.3V (正常) / GND(刷固件)</td><td>运行模式拉高</td></tr>
+<tr><td>GPIO2</td><td>3.3V</td><td>拉高</td></tr>
+</table>
+<div class="warn">ESP8266 峰值电流 300mA，F407 板载 3.3V LDO 可能不够。建议外接 AMS1117-3.3 独立供电，或用车充 5V→AMS1117→3.3V。</div>
+
+<h4>ELM327 UART版 → F407</h4>
+<table>
+<tr><th>ELM327</th><th>F407</th><th>说明</th></tr>
+<tr><td>VCC</td><td>5V</td><td>ELM327 通常 5V 供电</td></tr>
+<tr><td>GND</td><td>GND</td><td>共地</td></tr>
+<tr><td>TX</td><td>PA3 (USART2 RX)</td><td>ELM发→F407收</td></tr>
+<tr><td>RX</td><td>PA2 (USART2 TX)</td><td>F407发→ELM收</td></tr>
+</table>
+
+<h4>GPS NEO-6M → F407</h4>
+<table>
+<tr><th>NEO-6M</th><th>F407</th><th>说明</th></tr>
+<tr><td>VCC</td><td>3.3V</td><td>供电</td></tr>
+<tr><td>GND</td><td>GND</td><td>共地</td></tr>
+<tr><td>TX</td><td>PB11 (USART3 RX)</td><td>GPS发→F407收</td></tr>
+<tr><td>RX</td><td>PB10 (USART3 TX)</td><td>可选，发配置命令</td></tr>
+<tr><td>PPS</td><td>悬空或接GPIO</td><td>1秒脉冲，可选</td></tr>
+</table>
+
+<h4>MPU6050 → F407</h4>
+<table>
+<tr><th>MPU6050</th><th>F407</th><th>说明</th></tr>
+<tr><td>VCC</td><td>3.3V</td><td>供电</td></tr>
+<tr><td>GND</td><td>GND</td><td>共地</td></tr>
+<tr><td>SCL</td><td>PB6 (I2C1 SCL)</td><td>I2C时钟</td></tr>
+<tr><td>SDA</td><td>PB7 (I2C1 SDA)</td><td>I2C数据</td></tr>
+<tr><td>AD0</td><td>GND</td><td>I2C地址 0x68</td></tr>
+</table>
+
+<h3>3.3 电源方案</h3>
+<div class="danger">汽车电源环境恶劣（瞬时高压、浪涌、抛负载）。F407 板子直接接点烟器会烧。</div>
+<ul>
+<li><strong>车充 USB 5V/2A</strong> → 给平板充电 + F407 供电（F407 板载 5V→3.3V LDO）</li>
+<li><strong>AMS1117-3.3</strong> 独立给 ESP8266 供电（5V→3.3V，峰值 300mA）</li>
+<li><strong>TVS 二极管</strong>（SMBJ24A）跨在 5V 输入端防浪涌</li>
+<li>所有模块<strong>共地</strong></li>
+</ul>
+
+<h2>四、软件架构</h2>
+
+<h3>4.1 数据流</h3>
+<pre><code>OBD ELM327 ──UART2──┐
+GPS NEO-6M ──UART3──┤
+MPU6050    ──I2C1───┤── F407 ──USART1──→ ESP8266 ──WiFi──→ 平板浏览器
+                     │    │                      ←── (指令) ──┘
+MicroSD    ──SDIO────┘    │
+                          ├─ OBD数据解析 (AT命令收发+响应解析)
+                          ├─ GPS NMEA 解析 ($GPRMC)
+                          ├─ IMU 数据读取 + 姿态解算
+                          ├─ 能耗算法 (FPU: 功率积分 kWh/100km)
+                          ├─ HTTP服务器 (JSON打包 + TCP推送)
+                          └─ SD日志 (FATFS 时序记录)
+</code></pre>
+
+<h3>4.2 F407 固件结构</h3>
+<pre><code>imt407-car-hud/
+├── Core/
+│   ├── main.c              # 主循环 + 任务调度
+│   ├── obd.c / obd.h       # ELM327 AT命令收发 + PID解析
+│   ├── gps.c / gps.h       # NMEA 0183 解析
+│   ├── imu.c / imu.h       # MPU6050 I2C读取
+│   ├── energy.c / energy.h # 能耗计算 (功率积分, kWh/100km)
+│   ├── wifi.c / wifi.h     # ESP8266 AT命令控制
+│   ├── httpd.c / httpd.h   # 简单HTTP/TCP服务器
+│   └── sdlog.c / sdlog.h   # FATFS数据日志
+├── Drivers/                 # HAL库 + CMSIS
+├── Middlewares/             # FATFS (可选FreeRTOS)
+└── WebUI/
+    └── index.html          # HUD仪表盘网页(烧入SPI Flash或SD卡)
+</code></pre>
+
+<h3>4.3 通信协议</h3>
+<p>F407 → 平板: JSON over TCP，每秒推送 3-5 次</p>
+<pre><code class="json">{
+  "speed": 88,          // km/h (GPS)
+  "soc": 67,            // 电池电量% (OBD PID 015B)
+  "voltage": 396,       // 电池电压V (OBD PID 0105 or 015C)
+  "current": -12.3,     // 电流A (正=耗电, 负=回收)
+  "power": -4.8,        // 功率kW (电压×电流/1000)
+  "energy_km": 11.2,    // kWh/100km (滑动平均)
+  "regen_pct": 18,      // 能量回收率%
+  "motor_rpm": 4200,    // 电机转速 (OBD PID 012C or 0142)
+  "throttle": 23,       // 油门开度% (OBD PID 0111)
+  "temp_batt": 32,      // 电池温度°C (OBD PID 015C)
+  "accel_x": 0.12,      // IMU X轴 g
+  "grade": 2.3,         // 坡度% (IMU+GPS推算)
+  "lat": 39.9042,       // GPS纬度
+  "lon": 116.4074,     // GPS经度
+  "altitude": 54,      // 海拔m
+  "ts": 1722528000      // Unix时间戳
+}
+</code></pre>
+
+<h2>五、代码骨架</h2>
+
+<h3>5.1 ESP8266 AT 命令初始化</h3>
+<pre><code><span class="c">// wifi.c - ESP8266 初始化为 AP + TCP 服务器</span>
+<span class="k">void</span> <span class="f">ESP8266_Init</span>(<span class="k">void</span>) {
+    <span class="c">// 1. 复位</span>
+    <span class="f">ESP_Send</span>(<span class="s">"AT+RST\r\n"</span>);
+    <span class="f">ESP_WaitOK</span>(<span class="n">2000</span>);
+
+    <span class="c">// 2. 设为 AP 模式（平板直连，不需要路由器）</span>
+    <span class="f">ESP_Send</span>(<span class="s">"AT+CWMODE=2\r\n"</span>);
+    <span class="f">ESP_WaitOK</span>(<span class="n">1000</span>);
+
+    <span class="c">// 3. 配置热点</span>
+    <span class="f">ESP_Send</span>(<span class="s">"AT+CWSAP=\"F407-HUD\",\"12345678\",5,3\r\n"</span>);
+    <span class="c">//              SSID        密码     通道  WPA2</span>
+    <span class="f">ESP_WaitOK</span>(<span class="n">2000</span>);
+
+    <span class="c">// 4. 启动 TCP 服务器，端口 80</span>
+    <span class="f">ESP_Send</span>(<span class="s">"AT+CIPMUX=1\r\n"</span>);      <span class="c">// 多连接模式</span>
+    <span class="f">ESP_WaitOK</span>(<span class="n">500</span>);
+    <span class="f">ESP_Send</span>(<span class="s">"AT+CIPSERVER=1,80\r\n"</span>); <span class="c">// 开TCP服务</span>
+    <span class="f">ESP_WaitOK</span>(<span class="n">1000</span>);
+}
+
+<span class="c">// 向指定连接ID发送数据</span>
+<span class="k">void</span> <span class="f">ESP_SendJSON</span>(<span class="t">uint8_t</span> conn_id, <span class="k">char</span>* json, <span class="t">uint16_t</span> len) {
+    <span class="k">char</span> cmd[<span class="n">32</span>];
+    <span class="f">sprintf</span>(cmd, <span class="s">"AT+CIPSEND=%d,%d\r\n"</span>, conn_id, len);
+    <span class="f">ESP_Send</span>(cmd);
+    <span class="f">HAL_Delay</span>(<span class="n">50</span>);
+    <span class="f">ESP_SendRaw</span>(json, len);  <span class="c">// 发JSON体</span>
+}
+</code></pre>
+
+<h3>5.2 OBD 读取（ELM327 AT 命令）</h3>
+<pre><code><span class="c">// obd.c - ELM327 通信</span>
+<span class="k">void</span> <span class="f">OBD_Init</span>(<span class="k">void</span>) {
+    <span class="f">OBD_Send</span>(<span class="s">"ATZ\r"</span>);       <span class="c">// 复位</span>
+    <span class="f">HAL_Delay</span>(<span class="n">500</span>);
+    <span class="f">OBD_Send</span>(<span class="s">"ATE0\r"</span>);      <span class="c">// 关回显</span>
+    <span class="f">OBD_Wait</span>(<span class="s">"OK"</span>);
+    <span class="f">OBD_Send</span>(<span class="s">"ATSP0\r"</span>);     <span class="c">// 自动协议</span>
+    <span class="f">OBD_Wait</span>(<span class="s">"OK"</span>);
+    <span class="f">OBD_Send</span>(<span class="s">"0100\r"</span>);      <span class="c">// 协议探测</span>
+    <span class="f">HAL_Delay</span>(<span class="n">1000</span>);
+}
+
+<span class="c">// 读 PID，返回原始响应字符串</span>
+<span class="t">int</span> <span class="f">OBD_ReadPID</span>(<span class="t">uint8_t</span> pid, <span class="t">uint8_t</span>* data) {
+    <span class="k">char</span> cmd[<span class="n">16</span>];
+    <span class="f">sprintf</span>(cmd, <span class="s">"01%02X\r"</span>, pid);
+    <span class="f">OBD_Send</span>(cmd);
+    <span class="c">// 响应格式: "41 XX DD DD..." 解析DD</span>
+    <span class="c">// 例: 010C(转速) → 41 0C 1A F8 → (0x1AF8)/4 = 1726 RPM</span>
+    <span class="k">return</span> <span class="f">OBD_ParseResponse</span>(pid, data);
+}
+
+<span class="c">// 常用 PID</span>
+<span class="c">// 0C = 转速, 0D = 车速, 05 = 水温, 11 = 油门, 42 = 控制模块电压</span>
+<span class="c">// EV专用: 5B = SOC, 5C = 电池温度 (ISO 15031-5 扩展)</span>
+</code></pre>
+
+<h3>5.3 能耗算法</h3>
+<pre><code><span class="c">// energy.c - 功率积分计算 kWh/100km</span>
+<span class="k">typedef</span> <span class="k">struct</span> {
+    <span class="t">float</span> power_kw;      <span class="c">// 瞬时功率 (电压×电流/1000)</span>
+    <span class="t">float</span> energy_kwh;   <span class="c">// 累计消耗能量</span>
+    <span class="t">float</span> regen_kwh;    <span class="c">// 累计回收能量</span>
+    <span class="t">float</span> distance_km;  <span class="c">// 累计里程</span>
+    <span class="t">float</span> energy_per_km; <span class="c">// kWh/100km 滑动窗口</span>
+} EnergyState;
+
+<span class="c">// 每100ms调用一次, 用FPU做浮点积分</span>
+<span class="k">void</span> <span class="f">Energy_Update</span>(EnergyState* s, <span class="t">float</span> voltage, <span class="t">float</span> current, <span class="t">float</span> speed_kmh) {
+    s->power_kw = voltage * current / <span class="n">1000.0f</span>;
+    <span class="t">float</span> dt = <span class="n">0.1f</span>;  <span class="c">// 100ms</span>
+    <span class="t">float</span> dE = s->power_kw * dt / <span class="n">3600.0f</span>;  <span class="c">// kWh</span>
+    <span class="k">if</span> (s->power_kw > <span class="n">0</span>) s->energy_kwh += dE;
+    <span class="k">else</span> s->regen_kwh += -dE;
+    s->distance_km += speed_kmh * dt / <span class="n">3600.0f</span>;
+    <span class="k">if</span> (s->distance_km > <span class="n">0.01f</span>)
+        s->energy_per_km = (s->energy_kwh - s->regen_kwh) / s->distance_km * <span class="n">100.0f</span>;
+}
+</code></pre>
+
+<h3>5.4 HTML5 HUD 仪表盘模板</h3>
+<pre><code><span class="c">&lt;!DOCTYPE html&gt;</span>
+<span class="c">&lt;html&gt;&lt;head&gt;&lt;meta charset="UTF-8"&gt;</span>
+<span class="c">&lt;meta name="viewport" content="width=device-width,initial-scale=1.0"&gt;</span>
+<span class="c">&lt;title&gt;F407 HUD&lt;/title&gt;</span>
+<span class="c">&lt;style&gt;</span>
+<span class="f">body</span> { margin:<span class="n">0</span>; background:<span class="n">#000</span>; overflow:hidden; <span class="c">/* HUD: 纯黑底 */</span>
+         transform: scaleX(-<span class="n">1</span>); <span class="c">/* 镜像翻转! 反射回来才正常 */</span> }
+<span class="f">canvas</span> { display:block; width:<span class="n">100vw</span>; height:<span class="n">100vh</span> }
+<span class="c">&lt;/style&gt;</span>
+<span class="c">&lt;/head&gt;&lt;body&gt;</span>
+<span class="c">&lt;canvas id="hud"&gt;&lt;/canvas&gt;</span>
+<span class="c">&lt;script&gt;</span>
+<span class="k">const</span> canvas = document.<span class="f">getElementById</span>(<span class="s">'hud'</span>);
+<span class="k">const</span> ctx = canvas.<span class="f">getContext</span>(<span class="s">'2d'</span>);
+<span class="k">let</span> data = { speed:<span class="n">0</span>, soc:<span class="n">0</span>, power:<span class="n">0</span>, energy_km:<span class="n">0</span> };
+
+<span class="c">// WebSocket 或轮询拉取F407数据</span>
+<span class="f">setInterval</span>(<span class="k">async</span> () => {
+    <span class="k">try</span> {
+        <span class="k">const</span> r = <span class="k">await</span> <span class="f">fetch</span>(<span class="s">'http://192.168.4.1/data'</span>);
+        data = <span class="k">await</span> r.<span class="f">json</span>();
+    } <span class="k">catch</span>(e) {}
+}, <span class="n">300</span>);  <span class="c">// 300ms刷新</span>
+
+<span class="k">function</span> <span class="f">draw</span>() {
+        canvas.width = innerWidth; canvas.height = innerHeight;
+        <span class="k">const</span> cx = canvas.width/<span class="n">2</span>, cy = canvas.height/<span class="n">2</span>;
+        ctx.<span class="f">clearRect</span>(<span class="n">0</span>,<span class="n">0</span>,canvas.width,canvas.height);
+
+        <span class="c">// 速度大字 (黄色, 高对比度)</span>
+        ctx.fillStyle = <span class="s">'#FFD600'</span>;
+        ctx.font = <span class="s">'bold 120px sans-serif'</span>;
+        ctx.textAlign = <span class="s">'center'</span>;
+        ctx.<span class="f">fillText</span>(Math.<span class="f">round</span>(data.speed), cx, cy);
+
+        <span class="c">// km/h 单位</span>
+        ctx.font = <span class="s">'24px sans-serif'</span>;
+        ctx.fillStyle = <span class="s">'#888'</span>;
+        ctx.<span class="f">fillText</span>(<span class="s">'km/h'</span>, cx, cy+<span class="n">30</span>);
+
+        <span class="c">// 电量条 (绿色)</span>
+        <span class="k">const</span> bw=<span class="n">300</span>, bh=<span class="n">20</span>, bx=cx-bw/<span class="n">2</span>, by=cy+<span class="n">60</span>;
+        ctx.strokeStyle=<span class="s">'#333'</span>; ctx.<span class="f">strokeRect</span>(bx,by,bw,bh);
+        ctx.fillStyle=<span class="s">'#00E676'</span>;
+        ctx.<span class="f">fillRect</span>(bx,by, bw*data.soc/<span class="n">100</span>, bh);
+
+        <span class="c">// 功率/能耗 (白色小字)</span>
+        ctx.fillStyle=<span class="s">'#FFF'</span>; ctx.font=<span class="s">'20px monospace'</span>;
+        ctx.<span class="f">fillText</span>(data.power.toFixed(<span class="n">1</span>)+<span class="s">'kW'</span>, cx, by+<span class="n">50</span>);
+        ctx.<span class="f">fillText</span>(data.energy_km.toFixed(<span class="n">1</span>)+<span class="s">'kWh/100km'</span>, cx, by+<span class="n">75</span>);
+
+        <span class="f">requestAnimationFrame</span>(draw);
+    }
+<span class="f">draw</span>();
+<span class="c">&lt;/script&gt;&lt;/body&gt;&lt;/html&gt;</span>
+</code></pre>
+
+<h2>六、开发路线图</h2>
+
+<table>
+<tr><th>步骤</th><th>目标</th><th>验证标准</th><th>预计工时</th></tr>
+<tr><td><strong>1</strong></td><td>F407+ESP8266建WiFi热点, 平板能连并打开网页</td><td>浏览器访问 192.168.4.1 显示内容</td><td>半天</td></tr>
+<tr><td><strong>2</strong></td><td>F407接OBD ELM327, 读车速/电量/SOC, JSON推送到网页</td><td>网页实时显示车辆数据刷新</td><td>1-2天</td></tr>
+<tr><td><strong>3</strong></td><td>网页Canvas画HUD仪表盘(镜像翻转, 高对比度配色)</td><td>界面流畅, 反射膜投影可读</td><td>1-2天</td></tr>
+<tr><td><strong>4</strong></td><td>接GPS+IMU, 加能耗算法(kWh/100km, 回收率, 坡度)</td><td>能耗数值合理, GPS定位准</td><td>2-3天</td></tr>
+<tr><td><strong>5</strong></td><td>HUD反射膜+挡风玻璃实测, 亮度/可读性/夜间调试</td><td>夜间/阴天可读, 白天评估</td><td>1天</td></tr>
+</table>
+
+<div class="note">
+<strong>第一步最关键</strong>：验证 F407→ESP8266→平板 的 WiFi 通信链路通了，后面只是加数据源和改界面。如果第一步不通，后面全白搭。
+</div>
+
+<h2>七、避坑指南</h2>
+
+<h3>7.1 F407 通用避坑</h3>
+<div class="danger"><ul>
+<li><strong>DMA缓冲区不要放CCM</strong>：F407 的 64KB CCM 对 DMA 不可见，放进去数据搬不动</li>
+<li><strong>I/O严禁接5V</strong>：F407 I/O 是 3.3V，虽然多数5V容忍但不能当5V驱动</li>
+<li><strong>串口下载禁用FlyMcu</strong>：会锁F407芯片，用STM32CubeProgrammer</li>
+<li><strong>GPIO驱动能力</strong>：单脚±25mA极限，总电流≤150mA</li>
+<li><strong>3.3V排针别接5V</strong>：认准丝印，接错烧主控</li>
+</ul></div>
+
+<h3>7.2 ESP8266 避坑</h3>
+<div class="warn"><ul>
+<li><strong>峰值电流300mA</strong>：F407板载LDO可能不够，建议独立AMS1117-3.3供电</li>
+<li><strong>EN/CH_PD必须拉高</strong>：不拉高模块不启动</li>
+<li><strong>3.3V电平</strong>：ESP8266 RX 不耐5V，F407 TX(PA9)是3.3V正好匹配</li>
+<li><strong>AT固件版本</strong>：刷标准AT固件（非NodeMCU/Lua），支持CIPSERVER命令</li>
+</ul></div>
+
+<h3>7.3 OBD 通信避坑</h3>
+<div class="warn"><ul>
+<li><strong>极狐T1的OBD PID</strong>：标准PID(010C转速等)通用，但SOC/电池温度可能用扩展PID(015B/015C)或ISO 15118，需实测</li>
+<li><strong>ELM327响应延迟</strong>：蓝牙版3-8Hz，UART版15-30Hz，直连CAN 100+Hz</li>
+<li><strong>不能同时插两个OBD设备</strong>：用一转二延长线共用</li>
+<li><strong>只读不写</strong>：GB44495法规限制，不要尝试写入/刷写</li>
+</ul></div>
+
+<h3>7.4 HUD 投影避坑</h3>
+<div class="warn"><ul>
+<li><strong>屏幕亮度300-400nit</strong>：白天阳光直射偏暗，夜间/阴天够用</li>
+<li><strong>必须镜像翻转</strong>：HTML5用 <code>transform: scaleX(-1)</code>，否则反射后左右颠倒</li>
+<li><strong>纯黑底+高饱和色</strong>：黑色不反射减少眩光，黄/绿/白色字最亮</li>
+<li><strong>反射膜选专用HUD膜</strong>：普通玻璃反射率~8%，专用膜30-40%</li>
+</ul></div>
+
+<h2>八、放弃方案记录</h2>
+
+<table>
+<tr><th>方案</th><th>放弃原因</th></tr>
+<tr><td>CAN嗅探器+远程启动</td><td>极狐T1有GB44495网关隔离，报文注入被过滤；原车已有APP远程启动</td></tr>
+<tr><td>模拟钥匙芯片(Immo3/Hitag2)</td><td>已换新车，不需要；新车 immobilizer 更强</td></tr>
+<tr><td>氛围灯律动控制器</td><td>拼多多几块钱成品完成度更高，F407大板杀鸡用牛刀</td></tr>
+<tr><td>露营外放电功率计</td><td>同上，成品更便宜更完善</td></tr>
+<tr><td>小屏分屏HUD(HDMI输出)</td><td>安卓4.2的HDMI只能镜像不能扩展，分屏做不到</td></tr>
+<tr><td>蓝牙通信</td><td>七彩虹E708 Q1不支持蓝牙</td></tr>
+<tr><td>F407 VGA直连平板</td><td>平板HDMI是输出方向非输入，VGA是模拟信号不兼容</td></tr>
+</table>
+
+<h2>九、安全红线</h2>
+<div class="danger"><ul>
+<li><strong>只读OBD标准PID</strong>：不注入CAN报文，不刷写ECU，不修改车辆参数</li>
+<li><strong>不碰高压系统</strong>：极狐T1 400V平台，高压线束黄色标识，绝不拆碰</li>
+<li><strong>HUD不分散注意力</strong>：内容极简（速度/电量/导航），驾驶时余光瞥一眼即可</li>
+<li><strong>电源隔离</strong>：车充取电加TVS，不用车载12V直供F407</li>
+<li><strong>接线检查</strong>：通电前用万用表确认VCC/GND不短路、电平匹配</li>
+<li><strong>行车安全</strong>：调试在停车状态下进行，行驶中不看HUD调试数据</li>
+</ul></div>
+
+<h2>十、备选进阶方向</h2>
+<div class="note"><ul>
+<li><strong>电池SOH长期追踪</strong>：SD卡记录每次充放电曲线，月度对比容量衰减</li>
+<li><strong>驾驶行为AI评分</strong>：IMU+OBD数据→TinyML模型(50KB)→急刹/急转/疲劳检测</li>
+<li><strong>振动异响诊断</strong>：麦克风(I2S)+FFT频谱分析，悬挂/轴承异常预警</li>
+<li><strong>F407双CAN直读</strong>：绕过ELM327，直读CAN总线(100+Hz)，需确认网关过滤范围</li>
+<li><strong>多屏仪表</strong>：FSMC驱动并口大屏+SPI副屏，三屏并发(DMA+双缓冲)</li>
+</ul></div>
+
+<hr style="border:none;border-top:1px solid var(--border);margin:24px 0">
+<p style="color:var(--muted);font-size:11px;text-align:center">
+IMT407 极狐T1 车载HUD项目 · 2026-09-05 · 跟踪日志见 PROGRESS.md
+</p>
+
+</body>
+</html>
