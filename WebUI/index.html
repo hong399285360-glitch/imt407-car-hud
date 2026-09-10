@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>F407 HUD v7.1</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#000;overflow:hidden;width:100vw;height:100vh}
+canvas{display:block;width:100%;height:100%}
+body.mirror{transform:scaleX(-1)}
+</style>
+</head>
+<body class="mirror">
+<canvas id="hud" width="867" height="624"></canvas>
+<script>
+(function(){
+'use strict';
+var canvas=document.getElementById('hud');
+var ctx=canvas.getContext('2d');
+
+// ==================== 画布尺寸 / 高分屏 ====================
+// 原实现每帧 canvas.width=window.innerWidth: 只要给 width 赋值, 浏览器就会清空画布
+// 并重置 2D 状态(即使尺寸没变), 纯浪费; 且没有 devicePixelRatio 处理, 平板上被拉伸
+// 放大后文字发虚。这里改为尺寸变化时才重建, 并按 DPR 放大物理像素。
+var VW=0,VH=0,DPR=1;
+function resizeCanvas(){
+    var dpr=Math.min(window.devicePixelRatio||1,2);  // 封顶 2 倍: 3x 屏像素量再翻 2.25 倍, 平板带不动
+    var cw=window.innerWidth,ch=window.innerHeight;
+    if(cw===VW&&ch===VH&&dpr===DPR)return;
+    VW=cw;VH=ch;DPR=dpr;
+    canvas.width=Math.round(cw*dpr);
+    canvas.height=Math.round(ch*dpr);
+    canvas.style.width=cw+'px';
+    canvas.style.height=ch+'px';
+    // 逻辑坐标继续用 CSS 像素, 由 transform 负责放大到物理像素
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+resizeCanvas();
+
+// ==================== 数据 ====================
+var data={
+    speed:0,soc:78,voltage:380,current:0,power:0,
+    motor_rpm:0,motor_temp:45,igbt_temp:52,batt_temp:35,
+    cell_dv:70,batt_tmax:35,
+    energy_km:14.5,total_energy:0,total_regen:0,total_distance:0,
+    drive_score:100,drive_grade:1,
+    ts:0,obd_valid:0
+};
+var smooth={speed:0,power:0,rpm:0,voltage:380,soc:78,
+    motorTemp:45,igbtTemp:52,battTemp:35,cellDv:70,
+    energy:14.5,driveScore:100,
+    totalEnergy:0,totalRegen:0,totalDistance:0};
+var SF=0.15,MAX_PWR=80;
+var conn={obd:false,lastOk:0};
+function updateConn(){
+    // 基于本地时钟判定: 连续 3 秒收不到 obd_valid=1 的有效数据才算断线。
+    // 原实现用 100ms 轮询计数 (conn.t>30), 页面卡顿/定时器漂移都会误判。
+    var now=performance.now();
+    if(data.obd_valid===1){conn.obd=true;conn.lastOk=now;}
+    else if(now-conn.lastOk>3000){conn.obd=false;}
+}
+var CI='rgba(80,80,90,0.35)',CD='rgba(60,60,70,0.2)';
+
+// ==================== Shy Tech ====================
+// 主界面与停车面板的透明度统一在这里算, 保证任意时刻只有一个可见:
+//   speed >= 5        主界面满显
+//   5 > speed >= 3.5  主界面淡出 (面板保持 0)
+//   3.5 > speed >= 2  面板淡入 (主界面已是 0)
+//   speed < 2         面板满显
+// 原实现 mainAlpha=1-shyAlpha 让两者在 0~5km/h 全程同时半透明, 视觉上互相叠字。
+var shyAlpha=0,mainAlpha=1;
+function updateShy(){
+    var spd=smooth.speed;
+    if(spd>=5){mainAlpha=1;shyAlpha=0;}
+    else if(spd>=3.5){mainAlpha=(spd-3.5)/1.5;shyAlpha=0;}
+    else if(spd>=2){mainAlpha=0;shyAlpha=(3.5-spd)/1.5;}
+    else {mainAlpha=0;shyAlpha=1;}
+}
+
+// ==================== 粒子 ====================
+var particles=[],MAX_P=70;
+// 光晕用预渲染的径向渐变贴图, 替代 shadowBlur:
+// shadowBlur 是逐像素高斯模糊, 最多 70 个粒子每帧各调一次, 平板上直接掉帧。
+// 贴图只按颜色生成一次, 之后每帧只做一次 drawImage 缩放。
+var dotCache={};
+function glowDot(hex){
+    if(dotCache[hex])return dotCache[hex];
+    var S=64,cv=document.createElement('canvas');
+    cv.width=cv.height=S;
+    var g=cv.getContext('2d');
+    var r=parseInt(hex.slice(1,3),16),gg=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    var rg=g.createRadialGradient(S/2,S/2,0,S/2,S/2,S/2);
+    rg.addColorStop(0,'rgba('+r+','+gg+','+b+',1)');
+    rg.addColorStop(0.35,'rgba('+r+','+gg+','+b+',0.5)');
+    rg.addColorStop(1,'rgba('+r+','+gg+','+b+',0)');
+    g.fillStyle=rg;g.fillRect(0,0,S,S);
+    dotCache[hex]=cv;
+    return cv;
+}
+function spawnP(x0,x1,y,band){
+    var p=smooth.power,isReg=p<0,abs=Math.abs(p);
+    var it=Math.min(abs/MAX_PWR,1);
+    var sp=3+it*9,cnt=Math.round(it*4)+1;
+    var col=isReg?'#00E676':'#06B6D4';
+    for(var i=0;i<cnt&&particles.length<MAX_P;i++)
+        particles.push({x:isReg?x1:x0,y:y+(Math.random()-0.5)*band,
+            vx:isReg?-sp:sp,vy:(Math.random()-0.5)*0.4,life:1,col:col,
+            sz:3+Math.random()*4+it*4});
+}
+function updateP(x0,x1){
+    for(var i=particles.length-1;i>=0;i--){
+        var p=particles[i];p.x+=p.vx;p.y+=p.vy;p.life-=0.012;
+        if(p.life<=0||p.x<x0-60||p.x>x1+60)particles.splice(i,1);
+    }
+}
+
+// ==================== Mock ====================
+// 默认关闭: 真机部署必须显示真实数据, 避免把模拟值误当成车辆数据。
+// 本地调 UI 时用 http://.../?mock=1 打开, 或按 m 键临时切换。
+var mockMode=/[?&]mock=1/.test(location.search),mockConn=true,mockT=0;
+var mockScore=100,mockE=0,mockR=0,mockD=0;
+function mockData(){
+    var t=Date.now()/1000;
+    mockT++;
+    if(mockT%300===0)mockConn=false;
+    if(mockT%300===50)mockConn=true;
+    data.obd_valid=mockConn?1:0;
+    if(mockConn){
+        var phase=(t%60)/60;
+        if(phase<0.15)data.speed=0;
+        else if(phase<0.25)data.speed=3+Math.random();
+        else data.speed=50+30*Math.sin((phase-0.25)*8)+Math.random()*3;
+        data.power=20+20*Math.sin(t*0.5);
+        if(Math.random()<0.2)data.power=-8-Math.random()*12;
+        data.motor_rpm=2000+data.speed*60;
+        data.voltage=380+Math.sin(t*0.4)*5;
+        data.current=data.power>0?data.power/data.voltage*1000:-data.power/data.voltage*1000;
+        data.brake=(data.power<0&&Math.random()<0.3)?20+Math.random()*40:0;
+        data.motor_temp=45+Math.sin(t*0.12)*15;
+        data.igbt_temp=52+Math.sin(t*0.14)*12;
+        data.batt_temp=35+Math.sin(t*0.1)*3;
+        data.soc=78-(t%600)*0.02;
+        data.cell_dv=50+Math.sin(t*0.08)*40;
+        data.batt_tmax=35+Math.sin(t*0.06)*4;
+        data.throttle=Math.max(0,data.power)/MAX_PWR*100;
+        var dt=0.1,dE=data.power*dt/3600;
+        if(data.power>0)mockE+=dE;else mockR+=-dE;
+        mockD+=data.speed*dt/3600;
+        data.total_energy=mockE;data.total_regen=mockR;data.total_distance=mockD;
+        data.energy_km=mockD>0.01?(mockE-mockR)/mockD*100:14.5;
+        if(data.throttle>80&&data.power>50)mockScore-=0.3;
+        if(data.power<0)mockScore+=0.1;
+        mockScore=Math.max(60,Math.min(100,mockScore));
+        data.drive_score=mockScore;
+        data.drive_grade=mockScore>=90?1:mockScore>=80?2:mockScore>=70?3:mockScore>=60?4:5;
+    }
+    data.ts=Math.floor(Date.now()/1000);
+}
+function fetchData(){
+    var x=new XMLHttpRequest();x.open('GET','/data',true);x.timeout=500;
+    x.onreadystatechange=function(){if(x.readyState===4&&x.status===200)try{Object.assign(data,JSON.parse(x.responseText));}catch(e){}};
+    x.ontimeout=function(){};x.onerror=function(){};x.send();
+}
+function updateSmooth(){
+    function L(a,b,t){return a+(b-a)*t;}
+    smooth.speed=L(smooth.speed,data.speed,SF);
+    smooth.power=L(smooth.power,data.power,SF);
+    smooth.rpm=L(smooth.rpm,data.motor_rpm,SF);
+    smooth.voltage=L(smooth.voltage,data.voltage,SF*1.5);
+    smooth.soc=L(smooth.soc,data.soc,SF*0.5);
+    smooth.motorTemp=L(smooth.motorTemp,data.motor_temp,SF);
+    smooth.igbtTemp=L(smooth.igbtTemp,data.igbt_temp,SF);
+    smooth.battTemp=L(smooth.battTemp,data.batt_temp,SF);
+    smooth.cellDv=L(smooth.cellDv,data.cell_dv,SF);
+    smooth.energy=L(smooth.energy,data.energy_km,SF);
+    smooth.driveScore=L(smooth.driveScore,data.drive_score,SF*0.3);
+    smooth.totalEnergy=data.total_energy;
+    smooth.totalRegen=data.total_regen;
+    smooth.totalDistance=data.total_distance;
+}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+// ==================== 绘制工具 ====================
+function txt(t,x,y,sz,c,al,wt,gl){
+    ctx.fillStyle=c;
+    ctx.font=(wt||'normal')+' '+sz+'px "Rajdhani","Segoe UI",sans-serif';
+    ctx.textAlign=al||'left';ctx.textBaseline='middle';
+    if(gl){ctx.shadowColor=gl;ctx.shadowBlur=sz*0.3;}
+    else ctx.shadowBlur=0;
+    ctx.fillText(t,x,y);ctx.shadowBlur=0;
+}
+function measure(t,sz,wt){
+    ctx.font=(wt||'normal')+' '+sz+'px "Rajdhani","Segoe UI",sans-serif';
+    return ctx.measureText(t).width;
+}
+// 弧线: cx,cy=圆心, r=半径, a1→a2逆时针, c=颜色, w=线宽, gl=发光
+function arc(cx,cy,r,a1,a2,c,w,gl){
+    if(gl){ctx.shadowColor=c;ctx.shadowBlur=gl;}
+    ctx.beginPath();ctx.arc(cx,cy,r,a1,a2);
+    ctx.strokeStyle=c;ctx.lineWidth=w;ctx.lineCap='round';ctx.stroke();
+    ctx.shadowBlur=0;
+}
+
+// ==================== 主绘制 ====================
+var scanY=0;
+function draw(){
+    resizeCanvas();          // 尺寸/DPR 未变化时直接返回, 不重建画布
+    var w=VW,h=VH;
+    var cx=w/2;
+
+    var F={
+        mode:h*0.045,
+        power:h*0.16,
+        unit:h*0.045,
+        fLab:h*0.038,
+        fVal:h*0.085,
+        bar:h*0.016,
+        soc:h*0.09,
+        socR:h*0.17,
+        temp:h*0.07,
+        tempR:h*0.14,
+        tLabel:h*0.022,
+        pLab:h*0.042,
+        pVal:h*0.07,
+        time:h*0.028
+    };
+
+    ctx.fillStyle='#000';ctx.fillRect(0,0,w,h);
+
+    scanY=(scanY+3)%h;
+    var g=ctx.createLinearGradient(0,scanY-40,0,scanY+40);
+    g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(0.5,'rgba(0,150,255,0.01)');g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g;ctx.fillRect(0,scanY-40,w,80);
+
+    var ok=conn.obd;
+
+    // ============ 1. 功率 (240°弧形仪表 + 超大字) ============
+    ctx.globalAlpha=mainAlpha;
+    var p=ok?smooth.power:0,isReg=p<0,abs=Math.abs(p);
+    var pC=!ok?CI:(isReg?'#00E676':(abs<MAX_PWR*0.3?'#FFFFFF':(abs<MAX_PWR*0.6?'#FFD600':'#FF9800')));
+    var pG=!ok?null:(isReg?'rgba(0,230,118,0.5)':'rgba(255,255,255,0.4)');
+    var pRat=clamp(abs/MAX_PWR,0,1);
+
+    // 240°弧形仪表: 从150°到390°(=30°), 开口在底部
+    // 弧半径 = 字号×1.5, 确保文字宽度 < 弧直径
+    var gCx=cx,gCy=h*0.26,gR=F.power*1.5;
+    var gStart=Math.PI*150/180,gTotal=Math.PI*240/180;
+    // 背景弧
+    arc(gCx,gCy,gR,gStart,gStart+gTotal,'rgba(45,50,60,0.4)',Math.max(4,h*0.008));
+    // 前景弧 (按功率比例填充)
+    if(ok&&pRat>0.005){
+        arc(gCx,gCy,gR,gStart,gStart+gTotal*pRat,pC,Math.max(4,h*0.008),h*0.04);
+    }
+
+    // DRIVE/REGEN 标签 (弧顶部内侧)
+    txt(!ok?'NO DATA':(isReg?'REGEN':'DRIVE'),cx,gCy-gR*0.6,F.mode,
+        ok?(isReg?'rgba(0,230,118,0.6)':'rgba(100,200,255,0.6)'):'rgba(255,82,82,0.5)','center','bold');
+
+    // 功率大字 (弧中央, 文字完全在弧内部)
+    var pStr=ok?abs.toFixed(1):'--';
+    txt(pStr,cx,gCy,F.power,pC,'center','bold',pG);
+    var pw=measure(pStr,F.power,'bold');
+    txt('kW',cx+pw/2+F.unit*0.4,gCy+F.power*0.3,F.unit,ok?'rgba(160,170,190,0.6)':CD,'left');
+
+    // ============ 2. 能量流文字链 (无框! 0.43H标签 / 0.51H数值) ============
+    var x1=w*0.18,x2=w*0.50,x3=w*0.82;
+    var vy=h*0.51,ly=h*0.43;
+
+    // 先算间隙 (粒子在文字下面, 先画粒子)
+    var gap1a=x1+F.fVal*1.4,gap1b=x2-F.fVal*1.4;
+    var gap2a=x2+F.fVal*1.4,gap2b=x3-F.fVal*1.4;
+    if(ok&&abs>0.5){
+        spawnP(gap1a,gap1b,vy,F.fVal*0.5);
+        spawnP(gap2a,gap2b,vy,F.fVal*0.5);
+    }
+    updateP(0,w);
+    // 粒子画在文字下层 (先画粒子, 后画文字, 文字盖在粒子上)
+    for(var i=0;i<particles.length;i++){
+        var pt=particles[i];
+        ctx.globalAlpha=mainAlpha*pt.life*0.8;
+        var img=glowDot(pt.col),d=pt.sz*4;
+        ctx.drawImage(img,pt.x-d/2,pt.y-d/2,d,d);
+    }
+    ctx.globalAlpha=mainAlpha;
+
+    // 方向箭头 (也在文字下面)
+    if(ok&&abs>0.5){
+        var aC=isReg?'#00E676':'#06B6D4',aD=isReg?-1:1;
+        var aS=F.fVal*0.45;
+        [[(gap1a+gap1b)/2],[(gap2a+gap2b)/2]].forEach(function(ax){
+            ctx.fillStyle=aC;ctx.shadowColor=aC;ctx.shadowBlur=16;
+            ctx.beginPath();
+            ctx.moveTo(ax+aD*aS,vy);ctx.lineTo(ax,vy-aS*0.7);ctx.lineTo(ax,vy+aS*0.7);
+            ctx.closePath();ctx.fill();ctx.shadowBlur=0;
+        });
+    }
+
+    // 文字遮罩: 椭圆形羽化半透明, 让粒子"路过"文字时变暗
+    function textMask(tx,ty,sz,tstr){
+        var tw=measure(tstr,sz,'bold');
+        var rx=tw/2+sz*0.3, ry=sz*0.65;
+        var grad=ctx.createRadialGradient(tx,ty,0,tx,ty,rx);
+        grad.addColorStop(0,'rgba(0,0,0,0.7)');
+        grad.addColorStop(0.6,'rgba(0,0,0,0.5)');
+        grad.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.save();
+        ctx.translate(tx,ty);
+        ctx.scale(1,ry/rx);
+        ctx.fillStyle=grad;
+        ctx.beginPath();ctx.arc(0,0,rx,0,Math.PI*2);ctx.fill();
+        ctx.restore();
+    }
+    // 遮罩画在粒子上层, 文字画在遮罩上层
+    var s1=ok?Math.round(smooth.voltage)+'V':'--';
+    var s2=ok?abs.toFixed(0)+'kW':'--';
+    var s3=ok?String(Math.round(smooth.speed)):'--';
+    textMask(x1,vy,F.fVal,s1);
+    textMask(x2,vy,F.fVal,s2);
+    textMask(x3,vy,F.fVal,s3);
+    textMask(x1,ly,F.fLab,'BAT');
+    textMask(x2,ly,F.fLab,ok?(isReg?'REGEN':'MOTOR'):'--');
+    textMask(x3,ly,F.fLab,'km/h');
+
+    // 文字画在遮罩上层
+    txt('BAT',x1,ly,F.fLab,ok?'rgba(6,182,212,0.6)':CI,'center','bold');
+    txt(ok?(isReg?'REGEN':'MOTOR'):'--',x2,ly,F.fLab,ok?(isReg?'rgba(0,230,118,0.6)':'rgba(255,214,0,0.6)'):CI,'center','bold');
+    txt('km/h',x3,ly,F.fLab,ok?'rgba(255,255,255,0.5)':CI,'center','bold');
+
+    txt(s1,x1,vy,F.fVal,ok?'#06B6D4':CD,'center','bold',ok?'rgba(6,182,212,0.4)':null);
+    txt(s2,x2,vy,F.fVal,ok?(isReg?'#00E676':'#FFD600'):CD,'center','bold',ok?(isReg?'rgba(0,230,118,0.4)':'rgba(255,214,0,0.4)'):null);
+    txt(s3,x3,vy,F.fVal,ok?'#FFFFFF':CD,'center','bold',ok?'rgba(255,255,255,0.4)':null);
+
+    // ============ 3. 车速进度条 (0.62H, 粗, 避让SOC/温度环) ============
+    var socGap=F.socR*1.3, tempGap=F.tempR*1.3;
+    var barX=w*0.13+socGap, barEnd=w*0.87-tempGap;
+    var barW=barEnd-barX,barY=h*0.62,barH=Math.max(6,F.bar);
+    ctx.fillStyle='rgba(25,25,35,0.7)';
+    ctx.fillRect(barX,barY,barW,barH);
+    var pct=clamp((ok?smooth.speed:0)/180,0,1);
+    if(ok&&pct>0.005){
+        ctx.shadowColor='#FFFFFF';ctx.shadowBlur=10;
+        ctx.fillStyle='#FFFFFF';
+        ctx.fillRect(barX,barY,barW*pct,barH);
+        ctx.shadowBlur=0;
+    }
+    // 低速时SOC/温度也淡出, 让面板接管
+    ctx.globalAlpha=mainAlpha;
+
+    // ============ 4. SOC环 (左下, 大环+大字居中) ============
+    var soc=ok?smooth.soc:0;
+    var socC=ok?(soc>20?'#00E676':'#FF5252'):CI;
+    var socR=F.socR;
+    var socX=w*0.13,socY=h*0.80;
+    // 内部黑色填充 (让文字背景干净)
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.beginPath();ctx.arc(socX,socY,socR-h*0.006,0,Math.PI*2);ctx.fill();
+    // 背景环
+    arc(socX,socY,socR,0,Math.PI*2,'rgba(35,40,50,0.6)',Math.max(4,h*0.007));
+    // 前景环 (从顶部开始, 按SOC%填充)
+    if(ok&&soc>0.5){
+        arc(socX,socY,socR,-Math.PI/2,-Math.PI/2+Math.PI*2*(soc/100),socC,Math.max(4,h*0.007),h*0.03);
+    }
+    // 文字用alphabetic baseline + 手动居中 (Canvas middle对数字偏上)
+    ctx.fillStyle=ok?socC:CD;ctx.font='bold '+F.soc+'px "Rajdhani","Segoe UI",sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='alphabetic';
+    if(ok?socC:null){ctx.shadowColor=socC;ctx.shadowBlur=F.soc*0.3;}
+    ctx.fillText(ok?Math.round(soc)+'%':'--',socX,socY+F.soc*0.35);
+    ctx.shadowBlur=0;
+
+    // ============ 5. 温度环 (右下, 大环+大字居中) ============
+    var temps=[[smooth.motorTemp,60,90],[smooth.igbtTemp,60,85],[smooth.battTemp,45,55]];
+    var maxT=0,maxC=CI;
+    for(var j=0;j<3;j++){
+        var tv=temps[j][0];
+        if(tv>maxT){maxT=tv;maxC=ok?(tv<temps[j][1]?'#00E676':(tv<temps[j][2]?'#FFD600':'#FF5252')):CI;}
+    }
+    var tR=F.tempR;
+    var tX=w*0.87,tY=h*0.80;
+    // 内部黑色填充
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.beginPath();ctx.arc(tX,tY,tR-h*0.006,0,Math.PI*2);ctx.fill();
+    // 背景环
+    arc(tX,tY,tR,0,Math.PI*2,'rgba(35,40,50,0.6)',Math.max(4,h*0.007));
+    // 前景环
+    if(ok){
+        var tRat=clamp((maxT-20)/100,0,1);
+        if(tRat>0.005)arc(tX,tY,tR,-Math.PI/2,-Math.PI/2+Math.PI*2*tRat,maxC,Math.max(4,h*0.007),h*0.03);
+    }
+    // 文字居中
+    ctx.fillStyle=ok?maxC:CD;ctx.font='bold '+F.temp+'px "Rajdhani","Segoe UI",sans-serif';
+    ctx.textAlign='center';ctx.textBaseline='alphabetic';
+    if(ok?maxC:null){ctx.shadowColor=maxC;ctx.shadowBlur=F.temp*0.3;}
+    ctx.fillText(ok?Math.round(maxT)+'\u00B0':'--',tX,tY+F.temp*0.35);
+    ctx.shadowBlur=0;
+
+    ctx.globalAlpha=1;
+
+    // ============ 6. Shy Tech 面板 (无框! 大字行) ============
+    if(shyAlpha>0.01){
+        ctx.globalAlpha=shyAlpha;
+        var rowH=h*0.10;
+        var lx=w*0.28,rx=w*0.72;
+        var y0=h*0.33;
+
+        var dv=smooth.cellDv,dvC=ok?(dv<50?'#00E676':(dv<100?'#FFD600':'#FF5252')):CI;
+        txt('\u0394V',lx,y0,F.pLab,ok?'rgba(140,150,170,0.5)':CD,'left');
+        txt(ok?dv.toFixed(0)+'mV':'--',rx,y0,F.pVal,ok?dvC:CD,'right','bold',ok?dvC:null);
+
+        y0+=rowH;
+        txt('kWh/100km',lx,y0,F.pLab,ok?'rgba(140,150,170,0.5)':CD,'left');
+        txt(ok?smooth.energy.toFixed(1):'--',rx,y0,F.pVal,ok?'#06B6D4':CD,'right','bold');
+
+        y0+=rowH;
+        txt('TRIP',lx,y0,F.pLab,ok?'rgba(140,150,170,0.5)':CD,'left');
+        txt(ok?smooth.totalDistance.toFixed(1)+'km':'--',rx,y0,F.pVal,ok?'#FFFFFF':CD,'right','bold');
+
+        y0+=rowH;
+        var sc=ok?smooth.driveScore:0,gr=data.drive_grade||1;
+        var gs=['','A','B','C','D','E'][gr];
+        var gc=ok?(gr<=2?'#00E676':(gr<=3?'#FFD600':'#FF5252')):CI;
+        txt('SCORE',lx,y0,F.pLab,ok?'rgba(140,150,170,0.5)':CD,'left');
+        txt(ok?Math.round(sc)+' '+gs:'--',rx,y0,F.pVal,ok?gc:CD,'right','bold',ok?gc:null);
+
+        y0+=rowH;
+        txt('M / I / B',lx,y0,F.pLab,ok?'rgba(140,150,170,0.5)':CD,'left');
+        var t1=smooth.motorTemp,t2=smooth.igbtTemp,t3=smooth.battTemp;
+        var tc=ok?(Math.max(t1,t2,t3)<60?'#00E676':(Math.max(t1,t2,t3)<90?'#FFD600':'#FF5252')):CD;
+        txt(ok?(Math.round(t1)+'\u00B0 '+Math.round(t2)+'\u00B0 '+Math.round(t3)+'\u00B0'):'--',rx,y0,F.pVal*0.8,tc,'right','bold');
+
+        ctx.globalAlpha=1;
+    }
+
+    // ============ 7. 连接点 + 时间 ============
+    var cC=conn.obd?'#00E676':'#FF5252';
+    ctx.shadowColor=conn.obd?'rgba(0,230,118,0.5)':'rgba(255,82,82,0.4)';
+    ctx.shadowBlur=8;ctx.fillStyle=cC;
+    ctx.beginPath();ctx.arc(w*0.03,h*0.05,F.time*0.4,0,Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+
+    // 时钟用浏览器本地时间。板子没有 RTC/GPS, 上报的 ts 只是"上电秒数",
+    // 不能当成绝对时间渲染 (否则会显示 1970 年)。
+    var t=new Date();
+    var ts=String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');
+    txt(ts,w*0.97,h*0.95,F.time,'rgba(120,140,170,0.4)','right');
+
+    requestAnimationFrame(draw);
+}
+
+setInterval(function(){
+    if(mockMode)mockData();else fetchData();
+    updateConn();updateSmooth();updateShy();
+},100);
+// 仅在 mock 模式下预填充, 否则保持全 0 直到收到板子的真实数据
+if(mockMode)for(var i=0;i<5;i++){mockData();updateConn();updateSmooth();updateShy();}
+draw();
+window.addEventListener('keydown',function(e){
+    if(e.key==='m'||e.key==='M')mockMode=!mockMode;
+});
+})();
+</script>
+
+
+</body></html>
