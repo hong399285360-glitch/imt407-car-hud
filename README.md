@@ -63,7 +63,7 @@ OBD-II 总线 ──CAN──> F407 解析 ──UART──> ESP8266 开热点 �
 .\Scripts\flash.ps1
 ```
 
-首次 clone 编译前，需先运行 `python Scripts/gen_web_page.py` 把 `WebUI/index.html` 生成为固件内嵌 C 源码（改过页面后也要重新跑）。
+`build.ps1` 会在编译前自动把 `WebUI/index.html` 生成固件内嵌 C 源码（`Core/Src/web_page.c`，该文件不入库）；若手动调用 CMake，则需先运行 `python Scripts/gen_web_page.py`。
 
 ### 3. 上板自测
 
