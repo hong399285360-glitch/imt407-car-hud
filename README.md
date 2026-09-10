@@ -1,94 +1,110 @@
 # IMT407 极狐T1 车载 HUD
 
-基于 STM32F407 的新能源车载抬头显示：CAN 直读 OBD-II → ESP8266 开热点 → 平板浏览器渲染 → 挡风玻璃反射显示。
+一款基于 **STM32F407** 的开源车载抬头显示（HUD）方案：CAN 总线直读 OBD-II 数据 → ESP8266 开热点 → 平板浏览器渲染 HUD → 挡风玻璃反射显示。
 
-> 私有项目，当前处于「烧录线到货前的代码冻结」阶段。完整进度见 [TASKS.md](TASKS.md) / [PROGRESS.md](PROGRESS.md)。
+针对极狐（ARCFOX）T1 新能源车设计，目标是把仪表盘上没有的电机功率、能量流、电池状态等信息，投影到驾驶视线正前方。
 
-## 硬件架构
+![HUD 界面预览](Docs/preview_hud.png)
 
-```
-        ┌──────────── F407 IMT407 ─────────────┐
-OBD-II ─→ CAN1(PB8/PB9) + TJA1050            SDIO(PC8-12/PD2) ←── MicroSD 日志
-        │                                      │
-        └── UART4(PA0/PA1) ── ESP8266(AP模式) ──→ 平板浏览器 ──→ 挡风玻璃反射
-```
+## 为什么做这个
 
-- **主控**：启明欣欣 STM32F407 轻奢版 V3.1（LQFP144 / 1MB Flash / 192KB SRAM / 168MHz）
-- **数据源**：CAN 直读 OBD-II（ISO 15765-4，Service 01 + 国标 Service 05），已彻底去掉 ELM327
-- **无线**：ESP8266（ESP-01S）AP 模式，SSID `F407-HUD`，HTTP 服务 + WebSocket 式轮询 `/data`
-- **日志**：MicroSD（FatFs），`hud_log.csv`（1s/行）+ `obd_scan.log`（诊断/告警文本）
-- **已移除**：GPS(NEO-6M)、MPU6050 IMU（相关 `gps.c`/`imu.c` 保留为无调用死代码，链接期被 `--gc-sections` 丢弃）
+原车仪表信息有限，而新能源车最该被驾驶员看见的是**能量消耗状态**——急加速多费多少电、松油门回收多少、电池健康如何。市面上的 OBD 盒子依赖 ELM327 协议转换，慢且绕，本项目直接砍掉 ELM327，用 STM32F407 的 CAN 控制器**直读车辆总线**。
 
-## 引脚速查
-
-| 外设 | 引脚 | 说明 |
-|------|------|------|
-| CAN1 | **PB8(RX) / PB9(TX)** AF9 | 不是 PA11/PA12（本板被 USB OTG 占用） |
-| UART4 | **PA0(TX) / PA1(RX)** AF8 | ESP8266 |
-| SDIO | PC8-12 + PD2 AF12 | MicroSD 4-bit |
-| ESP RST | PA8（推挽输出） | 硬复位 |
-| SWD | PA13 / PA14 | CMSIS-DAP 烧录 |
-
-完整引脚/时钟/中断表见 [Docs/pinmap.md](Docs/pinmap.md)。
-
-## 目录结构
+数据流只有一跳：
 
 ```
-Core/       固件源码（启动文件、链接脚本、HAL 回调、业务逻辑）
-Docs/       板子资料、引脚、接线、烧录、上板自测清单
-Scripts/    build.ps1 / flash.ps1 / gen_web_page.py / openocd.cfg
-WebUI/      HUD 页面前端源 index.html（经 gen_web_page.py 生成 Core/Src/web_page.c）
-Drivers/    ★ 不在此仓库，见下方「编译前置依赖」
+OBD-II 总线 ──CAN──> F407 解析 ──UART──> ESP8266 开热点 ──WiFi──> 平板浏览器渲染 ──反射──> 挡风玻璃
 ```
 
-## 编译前置依赖
+## 功能特性
 
-本仓库**不含第三方库**（`Drivers/` 目录与 STM32Cube 软件 pack）。编译前需补齐：
+- **CAN 直读 OBD-II**：ISO 15765-4 协议栈（单帧/多帧重组），Service 01 + 国标 Service 05，29 个 PID 自动扫描，已彻底移除 ELM327
+- **HUD 界面（HTML5 Canvas）**：功率大字 + 能量流粒子动画为视觉中心，车速降为底部进度条，SOC/温度环形指示，Shy Tech 停车隐藏
+- **驾驶评分**：急加速/急制动/能量回收/匀速工况实时计分
+- **SD 卡日志**：CSV 每秒一行全量数据 + 文本诊断日志，离线分析驾驶行为
+- **WiFi 无线下发**：ESP8266 AP 模式（SSID `F407-HUD`），HTTP `/data` 接口轮询刷新
 
-| 依赖 | 来源 | CMake 定位方式 |
-|------|------|----------------|
-| STM32F4 HAL 驱动 | STM32CubeMX 生成 `Drivers/STM32F4xx_HAL_Driver` | `HAL_DIR`（`Drivers/` 下） |
-| CMSIS Device (含 `system_stm32f4xx.c`) | STM32CubeMX 生成 `Drivers/CMSIS/Device/ST/STM32F4xx` | `DEV_DIR` |
-| CMSIS Core 6.3.0 | STM32Cube 软件 pack | 环境变量 `CMSIS_CORE_DIR`，兜底 `%LOCALAPPDATA%\stm32cube\packs\...\CMSIS\6.3.0\CMSIS\Core\Include` |
-| FreeRTOS 2.1.0 | STM32Cube 软件 pack | 环境变量 `FREERTOS_PACK_DIR`，兜底 `%LOCALAPPDATA%\stm32cube\packs\...\freertos\2.1.0` |
-| FatFs | STM32CubeMX 生成 `Drivers/FatFs/source`（`ff.c/ffsystem.c/ffunicode.c` + `ffconf.h`） | `FATFS_DIR` |
+## 硬件清单
 
-> 用 STM32CubeMX 选 STM32F407ZGT6，开启 FreeRTOS + FATFS + SDIO + CAN + UART4 即可生成上述 `Drivers/`；CMSIS Core 与 FreeRTOS pack 通过 CubeMX「Manage software packs」安装。
-> 若 pack 安装路径与默认不同，设置 `CMSIS_CORE_DIR` 和 `FREERTOS_PACK_DIR` 两个环境变量即可，无需改 CMakeLists。
+| 部件 | 型号/说明 | 约价 |
+|------|-----------|------|
+| 主控板 | 启明欣欣 STM32F407 轻奢版 V3.1（LQFP144 / 1MB Flash / 192KB SRAM / 168MHz） | — |
+| CAN 收发器 | TJA1050（5V 供电，连接 OBD 的 CAN-H/CAN-L） | ~¥5 |
+| WiFi 模组 | ESP8266 ESP-01S（AT 固件，AP 模式） | ~¥10 |
+| 显示 | 七彩虹 E708 Q1 平板 + 反射膜贴屏幕 | 旧物利用 |
+| 存储 | MicroSD 卡（FatFs 日志） | — |
+| 烧录 | CMSIS-DAP 调试器 + SWD 杜邦线 | ~¥15 |
 
-## 编译 & 烧录
+完整接线图与安全红线见 [Docs/wiring_guide.md](Docs/wiring_guide.md)。
+
+## 快速开始
+
+### 1. 前置依赖
+
+本仓库**不含第三方库**（`Drivers/` 目录），编译前需用 STM32CubeMX 补齐：
+
+| 依赖 | 来源 |
+|------|------|
+| STM32F4 HAL 驱动 | CubeMX 生成 `Drivers/STM32F4xx_HAL_Driver` |
+| CMSIS Device | CubeMX 生成 `Drivers/CMSIS/Device/ST/STM32F4xx` |
+| CMSIS Core 6.3.0 | Cube 软件 pack（环境变量 `CMSIS_CORE_DIR`） |
+| FreeRTOS 2.1.0 | Cube 软件 pack（环境变量 `FREERTOS_PACK_DIR`） |
+| FatFs | CubeMX 生成 `Drivers/FatFs/source` |
+
+> 用 CubeMX 选 STM32F407ZGT6，开启 FreeRTOS + FATFS + SDIO + CAN + UART4 即可生成。pack 安装路径非默认时，设置 `CMSIS_CORE_DIR` 和 `FREERTOS_PACK_DIR` 两个环境变量即可，无需改 CMakeLists。
+
+### 2. 编译 & 烧录
 
 ```powershell
 # 编译（自动定位 cmake/ninja/arm-gcc 与软件 pack）
 .\Scripts\build.ps1
 
-# 烧录（CMSIS-DAP + SWD，不是 ST-Link；需 DSP 驱动 stmcdc.inf）
+# 烧录（CMSIS-DAP + SWD，不是 ST-Link）
 .\Scripts\flash.ps1
 ```
 
-- 当前固件：**54 编译单元，text=73536 / data=480 / bss=41376，0 错误 0 警告**（阶段14 静态审计后）
-- `Core/Src/web_page.c` 与 `Core/Inc/web_page.h` 是 `gen_web_page.py` 的生成物，**不入库**。首次 clone 编译前、以及每次改了 `WebUI/index.html` 后，都要先跑 `python Scripts/gen_web_page.py` 重新生成
-- 烧录线接法、常见失败排查见 [Docs/build_flash.md](Docs/build_flash.md)
+首次 clone 编译前，需先运行 `python Scripts/gen_web_page.py` 把 `WebUI/index.html` 生成为固件内嵌 C 源码（改过页面后也要重新跑）。
 
-## 上板自测
+### 3. 上板自测
 
-烧录线到货后，照 [Docs/board_self_test.md](Docs/board_self_test.md) 逐步执行（每步有判据与排查表）：
-A 编译烧录 → B SD 卡日志 → C WiFi/HTTP → D `/scan` 链路 → E CAN 回环 → F 实车 OBD。
+烧录线到手后，按 [Docs/board_self_test.md](Docs/board_self_test.md) 的 A~F 六个阶段逐步验证（每步有判据和排查表），从烧录、SD 卡日志、WiFi/HTTP、PID 扫描到 CAN 回环。
+
+### 4. 实车接入
+
+TJA1050 连接 OBD 座：`6=CAN-H`、`14=CAN-L`、`16=+12V`、`4/5=GND`。上电后固件自动扫描 29 个 PID 并写入 SD 卡，据此确认车辆实际响应的 PID 再微调 `Core/Src/can_obd.c`。
+
+## 项目状态
+
+| 里程碑 | 状态 |
+|--------|------|
+| 固件代码（协议栈/任务/日志/HTTP） | ✅ 完成 |
+| HUD 界面（v7.2，含 Shy Tech / 能量流） | ✅ 完成 |
+| 静态代码审计（两轮，0 错误 0 警告） | ✅ 完成 |
+| 上板硬件验证（烧录/SD/WiFi/CAN 回环） | ⏳ 等烧录线到货 |
+| 实车 OBD 联调 | ⏳ 等提车 |
+
+最新固件：**54 编译单元，text=73,536 / data=480 / bss=41,376，0 错误 0 警告**（gcc 14.3.1, `-Os`）。
 
 ## 文档索引
 
 | 文档 | 内容 |
 |------|------|
-| [TASKS.md](TASKS.md) | 任务清单 + 当前状态速览（压缩后先读这里） |
-| [PROGRESS.md](PROGRESS.md) | 完整变更日志与编译记录 |
-| [OBD_PID_TABLE.md](OBD_PID_TABLE.md) | OBD-II Service 01/05 PID 与极狐T1 调查 |
-| [Docs/pinmap.md](Docs/pinmap.md) | 权威引脚表 |
+| [Docs/pinmap.md](Docs/pinmap.md) | 权威引脚分配表 |
 | [Docs/wiring_guide.md](Docs/wiring_guide.md) | 硬件接线 + 安全红线 |
-| [Docs/board_reference.md](Docs/board_reference.md) | 开发板资料与路径 |
-| [Docs/self_audit_2026-09-09.md](Docs/self_audit_2026-09-09.md) | 阶段13 全工程自查结论 |
+| [Docs/board_self_test.md](Docs/board_self_test.md) | 上板自测清单（A~F 阶段） |
+| [Docs/build_flash.md](Docs/build_flash.md) | 编译烧录全流程与排障 |
+| [Docs/board_reference.md](Docs/board_reference.md) | 开发板硬件资料 |
+| [OBD_PID_TABLE.md](OBD_PID_TABLE.md) | OBD-II PID 与极狐T1 调查 |
+| [TASKS.md](TASKS.md) | 任务清单与路线图 |
+| [PROGRESS.md](PROGRESS.md) | 开发变更日志 |
+| [project.html](project.html) | 完整方案展示页（硬件架构/物料清单） |
 
-## 安全红线
+## 安全声明
 
-- 只读 CAN，不注入报文、不刷写 ECU
-- 不碰 400V 高压系统（橙色线束）
-- 调试在停车状态进行
+- **只读 CAN**：仅接收总线报文，不注入、不刷写 ECU
+- **不碰高压**：远离 400V 橙色线束，所有调试在停车状态进行
+- 改装车辆电气系统有风险，请自行评估并遵守当地法规
+
+## License
+
+[MIT](LICENSE) © 2026 hong399285360-glitch
