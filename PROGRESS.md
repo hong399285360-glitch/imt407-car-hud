@@ -1,9 +1,8 @@
 # IMT407 极狐T1 车载HUD项目 - 进度跟踪
 
 > 项目启动: 2026-09-05
-> 完整方案文档: [project.html](./project.html)
-> 架构决策参考: [.trae/documents/imt407-car-hud-project-preparation.md](./.trae/documents/imt407-car-hud-project-preparation.md)
-> 逐条任务清单: [TASKS.md](./TASKS.md)
+> 项目介绍与快速开始: [README.md](./README.md)
+> 任务清单与路线图: [TASKS.md](./TASKS.md)
 
 ## 里程碑
 
@@ -66,39 +65,9 @@
 > 校验命令: `Scripts/build.ps1`
 > 阶段间变化: text 62,672 → 73,536 (主要来自 `-u _printf_float` 引入的浮点格式化)
 
-## 已创建文件清单
+## 源码结构
 
-### Core/Inc (15个头文件)
-- shared_data.h, uart_ringbuf.h, wifi.h, obd.h, gps.h, imu.h, energy.h
-- httpd.h, sdlog.h, task_config.h, main.h, stm32f4xx_it.h, stm32f4xx_hal_conf.h
-- FreeRTOSConfig.h, cmsis_os2.h
-
-### Core/Src (15个源文件)
-- shared_data.c, uart_ringbuf.c, wifi.c, obd.c, gps.c, imu.c, energy.c
-- httpd.c, sdlog.c, task_config.c, main.c, stm32f4xx_it.c
-- stm32f4xx_hal_msp.c, syscalls.c, diskio.c, cmsis_os2.c
-
-### Drivers
-- **STM32F4xx_HAL_Driver**: Inc/ + Src/ (完整HAL库)
-- **CMSIS/Device/ST/STM32F4xx**: 设备头文件 + system_stm32f4xx.c
-- **FatFs/source**: ff.c, ffsystem.c, ffunicode.c, ffconf.h, diskio.h
-
-### WebUI
-- index.html (性能风格HUD仪表盘: G值球, 功率弧, 罗盘, RPM, 电压电流)
-
-### Scripts
-- build.ps1 (自动定位STM32 bundle工具链 + CMake + Ninja)
-- flash.ps1, openocd.cfg
-
-### 构建配置
-- CMakeLists.txt, arm-toolchain.cmake, STM32F407ZGTx_FLASH.ld
-- startup_stm32f407xx.s
-
-### Docs
-- wiring_guide.md, pinmap.md, build_flash.md
-
-### 项目根目录
-- .gitignore, TASKS.md, PROGRESS.md, project.html
+当前源码结构见 [README.md](./README.md)「目录结构」章节。`Drivers/`（STM32 HAL/FatFs 等第三方库）不入库，编译前由 STM32CubeMX 生成。
 
 ## 变更日志
 
