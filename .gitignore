@@ -1,0 +1,29 @@
+# Build outputs
+build/
+Debug/
+Release/
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# IDE files
+.vscode/
+*.workspace
+
+# CubeMX generated (will be committed after generation)
+# Drivers/
+# Middlewares/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Backup files
+*.bak
+*~
+
+# Generated web page (源 WebUI/index.html, 由 Scripts/gen_web_page.py 生成)
+Core/Src/web_page.c
+Core/Inc/web_page.h
