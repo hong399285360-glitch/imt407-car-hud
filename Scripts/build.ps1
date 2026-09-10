@@ -41,6 +41,13 @@ cmake --version | Select-Object -First 1
 ninja --version
 arm-none-eabi-gcc --version | Select-Object -First 1
 
+# 生成内嵌网页源码 (web_page.c / web_page.h)
+# 这两个文件在 .gitignore 中排除, 构建前必须从 WebUI/index.html 重新生成,
+# 否则 cmake 的 file(GLOB) 扫不到 web_page.c, httpd.c 会链接失败.
+Write-Host "`n=== 生成内嵌网页源码 ===" -ForegroundColor Cyan
+python (Join-Path $PROJECT_DIR "Scripts/gen_web_page.py")
+if ($LASTEXITCODE -ne 0) { Write-Host "生成 web_page.c 失败" -ForegroundColor Red; exit 1 }
+
 # 构建
 Write-Host "`n=== CMake Configure ===" -ForegroundColor Cyan
 cmake -B $BUILD_DIR -S $PROJECT_DIR -G Ninja -DCMAKE_BUILD_TYPE=Debug
